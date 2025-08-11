@@ -18,6 +18,9 @@ import logging
 import os
 import sys
 import time
+import subprocess
+import sys
+import shlex
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -378,28 +381,56 @@ class EnhancedMCPClient:
     
     @asynccontextmanager
     async def managed_session(self):
-        """Context manager for session lifecycle."""
-        self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=self.config.mcp.connection_timeout)
-        )
-        
+        """Context manager for session lifecycle, supports both SSE and stdio."""
+        self.transport = "sse" if self.config.mcp.server_url.startswith("sse+") else "stdio"
+
+        if self.transport == "stdio":
+            # Extract script path from stdio:// URL
+            server_script = self.config.mcp.server_url.replace("stdio://", "")
+            if not os.path.exists(server_script):
+                raise MCPClientError(
+                    ErrorType.CONFIGURATION_ERROR,
+                    f"Server script not found: {server_script}"
+                )
+
+            # Start server subprocess
+            self.server_process = subprocess.Popen(
+                [sys.executable, server_script],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE
+            )
+            logger.info("Started MCP server via stdio", script=server_script)
+
+            # In real MCP stdio integration, you'd connect stdin/stdout to the MCP protocol handler.
+            # For now we just log that the server is running.
+            self.session = None
+
+        else:
+            # SSE mode — connect via HTTP
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.config.mcp.connection_timeout)
+            )
+
         try:
             # Initialize components
             self.llm = OllamaClient(self.config.ollama)
             await self.llm.__aenter__()
-            
+
             self.tool_manager = MCPToolManager(self.config.mcp.server_url, self.session)
-            
+
             # Health check and tool discovery
             await self._initialize()
-            
+
             yield self
-            
+
         finally:
             if self.llm:
                 await self.llm.__aexit__(None, None, None)
-            if self.session:
+            if self.transport == "sse" and self.session:
                 await self.session.close()
+            if self.transport == "stdio" and hasattr(self, "server_process"):
+                self.server_process.terminate()
+                logger.info("Stopped MCP server subprocess")
     
     async def _initialize(self):
         """Initialize the client and discover tools."""
@@ -550,7 +581,7 @@ async def retry_with_backoff(
 
 @click.command()
 @click.option('--server-url', default='sse+http://127.0.0.1:8000/sse', help='MCP server URL')
-@click.option('--model', default='deepseek-r1:14b', help='Ollama model to use')
+@click.option('--model', default='llama3.2', help='Ollama model to use')
 @click.option('--ollama-url', default='http://localhost:11434', help='Ollama base URL')
 @click.option('--temperature', default=0.1, type=float, help='LLM temperature')
 @click.option('--verbose', is_flag=True, help='Enable verbose output')
@@ -605,7 +636,7 @@ def main(server_url: str, model: str, ollama_url: str, temperature: float, verbo
                             continue
                         
                         # Process message with spinner
-                        with Status("🤔 Thinking...", console=console) as status:
+                        with Status(" Thinking...", console=console) as status:
                             response = await client.process_message(user_input)
                         
                         # Display response
