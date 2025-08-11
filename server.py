@@ -12,6 +12,7 @@ mcp = FastMCP("pdb_toolkit")
 def fetch_pdb(pdb_id: str) -> str:
     """
     Download the structure file in .cif format for a given PDB ID and return the temporary file path.
+    If the file already exists in the internal data directory, it will use that instead of downloading.
     """
 
     pdb_id = pdb_id.strip().upper()
@@ -37,6 +38,8 @@ def fetch_pdb(pdb_id: str) -> str:
 def read_pdb(file_path: str) -> str:
     """
     Read a PDB or mmCIF file from the given file path and return its raw content as a string.
+    If the file does not exist, raises a FileNotFoundError.
+    This is useful for reading files that have been downloaded or stored locally.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -50,6 +53,8 @@ def read_pdb(file_path: str) -> str:
 def resolve_alias_to_uniprot(alias: str) -> str:
     """
     Resolve protein alias or name to UniProt ID.
+    Example: "Apo-E" -> "P02649"
+    This function queries the UniProt REST API to find the primary accession number
     """
     # Example using UniProt API:
     url = f"https://rest.uniprot.org/uniprotkb/search?query={alias}&format=json&fields=accession"
@@ -67,6 +72,7 @@ def map_uniprot_to_pdb(uniprot_id: str) -> list[str]:
     """
     Map UniProt ID to list of associated PDB IDs.
     Tries RCSB exact match first, then falls back to UniProt's own cross-references.
+    Example: "P02649" -> ["1A2B", "1C3D"]
     """
     pdb_ids = []
 
@@ -109,4 +115,8 @@ def map_uniprot_to_pdb(uniprot_id: str) -> list[str]:
 
 if __name__ == "__main__":
     # Initialize and run the MCP server
+    print("Starting MCP server...")
+
+    # Debug Mode
+    # uv run mcp dev server.py
     mcp.run(transport="stdio")
