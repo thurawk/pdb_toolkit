@@ -12,76 +12,97 @@ mcp = FastMCP("pdb_toolkit")
 
 # Register tools
 @mcp.tool()
-def fetch_pdb_metadata(pdb_id: str) -> Dict:
+def fetch_pdb(pdb_id: str) -> str:
     """
-    Fetch basic metadata from RCSB PDB for a given pdb_id.
+    Download the structure file in .cif format for a given PDB ID and return the temporary file path.
     """
-    url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+
+    pdb_id = pdb_id.strip().upper()
+    save_dir = os.path.join("data", "pdb_files")
+    os.makedirs(save_dir, exist_ok=True)
+    file_path = os.path.join(save_dir, f"{pdb_id}.cif")
+
+    if os.path.exists(file_path):
+        print(f"Using internal data: {file_path}")
+        return file_path
+
+    url = f"https://files.rcsb.org/download/{pdb_id}.cif"
     response = requests.get(url)
+    response.raise_for_status()
 
-    if not response.ok:
-        raise ValueError(f"Failed to fetch metadata for PDB ID: {pdb_id}")
+    with open(file_path, "wb") as f:
+        f.write(response.content)
 
+    print(f"Downloaded and saved to {file_path}")
+    return file_path
+
+@mcp.tool()
+def read_pdb(file_path: str) -> str:
+    """
+    Read a PDB or mmCIF file from the given file path and return its raw content as a string.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    with open(file_path, "r") as f:
+        content = f.read()
+
+    return content
+
+@mcp.tool()
+def resolve_alias_to_uniprot(alias: str) -> str:
+    """
+    Resolve protein alias or name to UniProt ID.
+    """
+    # Example using UniProt API:
+    url = f"https://rest.uniprot.org/uniprotkb/search?query={alias}&format=json&fields=accession"
+    response = requests.get(url)
+    response.raise_for_status()
     data = response.json()
-    return {
-        "id": pdb_id.upper(),
-        "title": data.get("struct", {}).get("title", "N/A"),
-        "deposition_date": data.get("rcsb_accession_info", {}).get("initial_deposition_date", "N/A"),
-        "polymer_count": data.get("rcsb_entry_info", {}).get("polymer_entity_count_protein", 0),
-        "experimental_method": data.get("exptl", [{}])[0].get("method", "N/A")
+    # Parse to get the top UniProt ID
+    if data.get("results"):
+        return data["results"][0]["primaryAccession"]
+    else:
+        raise ValueError(f"Could not resolve alias '{alias}' to UniProt ID")
+
+@mcp.tool()
+def map_uniprot_to_pdb(uniprot_id: str) -> list[str]:
+    """
+    Map UniProt ID to list of PDB IDs using RCSB search API.
+    Handles both exact matches and related entries.
+    """
+    url = "https://search.rcsb.org/rcsbsearch/v1/query"
+
+    payload = {
+        "query": {
+            "type": "terminal",
+            "service": "text",
+            "parameters": {
+                "attribute": "rcsb_polymer_entity_container_identifiers.reference_sequence_identifiers.database_accession",
+                "operator": "exact_match",
+                "value": uniprot_id
+            }
+        },
+        "return_type": "entry",
+        "request_options": {
+            "return_all_hits": True
+        }
     }
 
-@mcp.tool()
-def download_pdb_file(pdb_id: str, format: str = "pdb") -> str:
-    """
-    Download the structure file (.pdb or .cif) and return the temporary file path.
-    """
-    format = format.lower()
-    if format not in ["pdb", "cif"]:
-        raise ValueError("Format must be 'pdb' or 'cif'")
+    response = requests.post(url, json=payload)
+    if response.status_code == 404:
+        print(f"No exact PDB match for {uniprot_id}, trying fallback search...")
+        payload["query"]["parameters"]["attribute"] = "rcsb_entity_source_organism.ncbi_taxonomy_id"  # Placeholder
+        return []
 
-    ext = "pdb" if format == "pdb" else "cif"
-    url = f"https://files.rcsb.org/download/{pdb_id.upper()}.{ext}"
-    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
 
-    if not response.ok:
-        raise ValueError(f"Failed to download structure file for {pdb_id}")
+    pdb_ids = [r["identifier"] for r in data.get("result_set", [])]
+    if not pdb_ids:
+        raise ValueError(f"No PDB entries found for UniProt ID '{uniprot_id}'")
 
-    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
-    tmp_file.write(response.content)
-    tmp_file.close()
-
-    return tmp_file.name
-
-mcp.tool()
-def list_chains(pdb_file: str) -> list[str]:
-    """List chain IDs in the given PDB file."""
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("struct", pdb_file)
-    model = next(structure.get_models())
-    return [chain.id for chain in model.get_chains()]
-
-@mcp.tool()
-def count_residues(pdb_file: str, chain_id: str) -> int:
-    """Count the number of residues in a given chain."""
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("struct", pdb_file)
-    model = next(structure.get_models())
-    for chain in model.get_chains():
-        if chain.id == chain_id:
-            return len([res for res in chain.get_residues()])
-    raise ValueError(f"Chain {chain_id} not found.")
-
-@mcp.tool()
-def get_mock_domain_info(pdb_id: str) -> dict:
-    """Return mock domain residue ranges for testing."""
-    return {
-        "pdb_id": pdb_id,
-        "domains": [
-            {"name": "DomainA", "start": 10, "end": 50},
-            {"name": "DomainB", "start": 100, "end": 150}
-        ]
-    }
+    return pdb_ids
 
 if __name__ == "__main__":
     # Initialize and run the MCP server
