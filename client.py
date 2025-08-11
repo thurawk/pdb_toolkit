@@ -9,7 +9,7 @@ configuration management, and robust connection management.
 Usage:
     python client.py --help
     python client.py --server-url "sse+http://127.0.0.1:8000/sse"
-    python client.py --model llama3.2 --verbose
+    python client.py --model deepseek-r1:14b --verbose
 """
 
 import asyncio
@@ -70,7 +70,7 @@ class MCPClientError(Exception):
 
 class OllamaConfig(BaseModel):
     """Configuration for Ollama LLM."""
-    model: str = Field(default="llama3.2", description="Ollama model name")
+    model: str = Field(default="deepseek-r1:14b", description="Ollama model name")
     base_url: str = Field(default="http://localhost:11434", description="Ollama API base URL")
     request_timeout: float = Field(default=120.0, description="Request timeout in seconds")
     temperature: float = Field(default=0.1, description="LLM temperature")
@@ -550,7 +550,7 @@ async def retry_with_backoff(
 
 @click.command()
 @click.option('--server-url', default='sse+http://127.0.0.1:8000/sse', help='MCP server URL')
-@click.option('--model', default='llama3.2', help='Ollama model to use')
+@click.option('--model', default='deepseek-r1:14b', help='Ollama model to use')
 @click.option('--ollama-url', default='http://localhost:11434', help='Ollama base URL')
 @click.option('--temperature', default=0.1, type=float, help='LLM temperature')
 @click.option('--verbose', is_flag=True, help='Enable verbose output')
