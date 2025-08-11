@@ -581,7 +581,7 @@ async def retry_with_backoff(
 
 @click.command()
 @click.option('--server-url', default='sse+http://127.0.0.1:8000/sse', help='MCP server URL')
-@click.option('--model', default='llama3.2', help='Ollama model to use')
+@click.option('--model', default='deepseek-r1:14b', help='Ollama model to use')
 @click.option('--ollama-url', default='http://localhost:11434', help='Ollama base URL')
 @click.option('--temperature', default=0.1, type=float, help='LLM temperature')
 @click.option('--verbose', is_flag=True, help='Enable verbose output')
